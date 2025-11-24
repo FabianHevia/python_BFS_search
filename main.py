@@ -91,7 +91,7 @@ class Grid:
         """
         Genera un laberinto usando recursive backtracker (DFS con stack).
         Si yield_events == True, devuelve un iterador (generator) que
-        emite eventos dict por cada carve/backtrack y al finalizar.
+        emite eventos dict por cada carve/backtrack.
         Si yield_events == False, simplemente ejecuta la generación y retorna None.
         """
 
@@ -103,26 +103,23 @@ class Grid:
 
         # Si queremos yieldear eventos, definimos el generator
         def generator():
-            # evento inicial opcional
+            # Evento inicial opcional
             yield {"event": "start", "cell": self.start, "visited_count": len(visited), "stack_depth": len(stack)}
 
             while stack:
                 current = stack[-1]
                 r, c = current
 
-                # vecinos que aún no han sido visitados
+                # Vecinos que aún no han sido visitados
                 nbrs = [nb for nb in self.neighbors(r, c) if nb not in visited]
 
                 if nbrs:
-                    # elige uno aleatorio (puedes aplicar bias aquí si quieres)
                     chosen = rng.choice(nbrs)
-                    # romper el muro entre current y chosen
                     self.remove_wall(current, chosen)
-                    # marcar visited y push
                     visited.add(chosen)
                     stack.append(chosen)
 
-                    # emitir evento de carve
+                    # Emitir evento de carve
                     yield {
                         "event": "carve",
                         "from": current,
@@ -131,7 +128,7 @@ class Grid:
                         "stack_depth": len(stack)
                     }
                 else:
-                    # backtrack
+                    # Backtrack
                     popped = stack.pop()
                     yield {
                         "event": "backtrack",
@@ -140,13 +137,11 @@ class Grid:
                         "stack_depth": len(stack)
                     }
 
-            # terminado
             yield {"event": "done", "visited_count": len(visited), "stack_depth": 0}
 
         if yield_events:
             return generator()
         else:
-            # ejecutar sin yields: consumimos el generator completamente
             for _ in generator():
                 pass
             return None
