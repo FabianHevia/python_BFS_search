@@ -10,6 +10,7 @@ import random
 import tkinter as tk
 from typing import Tuple, List, Dict, Iterator, Optional, Any
 from tkinter import ttk
+from collections import deque
 
 def menu():
     print("\nBienvenido a Python BFS search environment\n")
@@ -31,7 +32,7 @@ def menu():
             print("El número debe estar entre 3 y 200. Intenta de nuevo.")
 
 Cell = Tuple[int, int]
-Event = Dict[str, object]
+Event = Dict[str, any]
 
 class Grid:
     def __init__(self, n):
@@ -158,6 +159,61 @@ class Grid:
                 pass
             return None
 
+    def bfs(self, start: Cell, goal: Cell, yield_events: bool = False) -> Optional[Iterator[Event]]:
+        """
+        BFS genera los eventos correspondientes para la visualización de la busqueda
+        Events:
+         - {"event":"start", "cell": start}
+         - {"event":"enqueue", "cell": node, "from": parent}
+         - {"event":"dequeue", "cell": node}
+         - {"event":"visit", "cell": node}
+         - {"event":"goal_found", "cell": goal, "path": [...cells...]}
+         - {"event":"finished", "found": bool, "visited_count": int}
+        """
+        def gen():
+            q: Deque[Cell] = deque()
+            visited: Set[Cell] = set()
+            parent: Dict[Cell, Optional[Cell]] = {}
+            q.append(start)
+            visited.add(start)
+            parent[start] = None
+            yield {"event": "start", "cell": start, "queue_size": len(q), "visited_count": len(visited)}
+
+            while q:
+                cur = q.popleft()
+                yield {"event": "dequeue", "cell": cur, "queue_size": len(q), "visited_count": len(visited)}
+
+                if cur == goal:
+                    path: List[Cell] = []
+                    node = cur
+                    while node is not None:
+                        path.append(node)
+                        node = parent.get(node)
+                    path.reverse()
+                    yield {"event": "goal_found", "cell": cur, "path": path, "visited_count": len(visited)}
+                    yield {"event": "finished", "found": True, "visited_count": len(visited)}
+                    return
+
+                for nb in self.neighbors(cur[0], cur[1]):
+
+                    if nb not in visited:
+                        visited.add(nb)
+                        parent[nb] = cur
+                        q.append(nb)
+                        yield {"event": "enqueue", "cell": nb, "from": cur, "queue_size": len(q), "visited_count": len(visited)}
+
+                yield {"event": "visit", "cell": cur, "queue_size": len(q), "visited_count": len(visited)}
+
+            yield {"event": "finished", "found": False, "visited_count": len(visited)}
+
+        if yield_events:
+            return gen()
+        
+        else:
+            for _ in gen():
+                pass
+            return None
+        
 # Visualizador del Grid
 class MainWindow(tk.Tk):
     def __init__(self, n):
@@ -508,10 +564,45 @@ def main():
     grid = Grid(n)
 
     generar = grid.recursive_backtracker(seed=1234, yield_events=True)
+    #print(generar)
     '''
     for environment in generar:
         print(environment)
     '''
+    bfs_gen = grid.bfs(grid.start, grid.goal, yield_events=True)
+    path = None
+    visited_count = 0
+
+    for ev in bfs_gen:
+        et = ev.get("event")
+
+        if et == "start":
+            print("BFS start at", ev.get("cell"))
+
+        elif et == "enqueue":
+            print(f" enqueue {ev.get('cell')} from {ev.get('from')} qsize={ev.get('queue_size')}")
+
+        elif et == "dequeue":
+            print(f" dequeue {ev.get('cell')} qsize={ev.get('queue_size')}")
+
+        elif et == "visit":
+            pass
+        
+        elif et == "goal_found":
+            path = ev.get("path")
+            print("Goal found! path length:", len(path))
+
+        elif et == "finished":
+            visited_count = ev.get("visited_count", 0)
+            print("Finished. found =", ev.get("found"), "visited_count =", visited_count)
+
+    if path:
+        print("Path (first 8 cells):", path[:8], "..." if len(path) > 8 else "")
+
+    else:
+        print("No path found.")
+
+    print("Test complete.")
 
     app = MainWindow(n)
     app.mainloop()
