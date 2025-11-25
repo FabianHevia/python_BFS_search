@@ -68,6 +68,25 @@ class Grid:
         posibles = [(r-1, c), (r+1, c), (r, c-1), (r, c+1)]
         return [(rr, cc) for (rr, cc) in posibles if self.in_bounds(rr, cc)]
     
+    def neighbors_open(self, r, c):
+        """Devuelve los vecinos a los que se puede avanzar (sin muro)."""
+        open_nbrs = []
+        cell = self.cells[(r, c)]
+
+        if not cell["wall_up"]:
+            open_nbrs.append((r-1, c))
+
+        if not cell["wall_down"]:
+            open_nbrs.append((r+1, c))
+
+        if not cell["wall_left"]:
+            open_nbrs.append((r, c-1))
+
+        if not cell["wall_right"]:
+            open_nbrs.append((r, c+1))
+
+        return open_nbrs
+    
     def remove_wall(self, a: Cell, b: Cell) -> None:
         (ar, ac), (br, bc) = a, b
 
@@ -160,60 +179,109 @@ class Grid:
             return None
 
     def bfs(self, start: Cell, goal: Cell, yield_events: bool = False) -> Optional[Iterator[Event]]:
-        """
-        BFS genera los eventos correspondientes para la visualización de la busqueda
-        Events:
-         - {"event":"start", "cell": start}
-         - {"event":"enqueue", "cell": node, "from": parent}
-         - {"event":"dequeue", "cell": node}
-         - {"event":"visit", "cell": node}
-         - {"event":"goal_found", "cell": goal, "path": [...cells...]}
-         - {"event":"finished", "found": bool, "visited_count": int}
-        """
-        def gen():
-            q: Deque[Cell] = deque()
-            visited: Set[Cell] = set()
-            parent: Dict[Cell, Optional[Cell]] = {}
-            q.append(start)
-            visited.add(start)
-            parent[start] = None
-            yield {"event": "start", "cell": start, "queue_size": len(q), "visited_count": len(visited)}
+        from collections import deque
 
-            while q:
-                cur = q.popleft()
-                yield {"event": "dequeue", "cell": cur, "queue_size": len(q), "visited_count": len(visited)}
+        queue = deque([start])
+        visited = {start}
+        parent = {start: None}
 
-                if cur == goal:
-                    path: List[Cell] = []
-                    node = cur
-                    while node is not None:
-                        path.append(node)
-                        node = parent.get(node)
-                    path.reverse()
-                    yield {"event": "goal_found", "cell": cur, "path": path, "visited_count": len(visited)}
-                    yield {"event": "finished", "found": True, "visited_count": len(visited)}
-                    return
+        def generator():
+            yield {
+                "event": "start",
+                "cell": start,
+                "visited_count": len(visited),
+                "queue_size": len(queue)
+            }
 
-                for nb in self.neighbors(cur[0], cur[1]):
+            while queue:
+                current = queue.popleft()
 
+                yield {
+                    "event": "expand",
+                    "cell": current,
+                    "queue_size": len(queue),
+                    "visited_count": len(visited)
+                }
+
+                if current == goal:
+                    break
+
+                for nb in self.neighbors_open(*current):
                     if nb not in visited:
                         visited.add(nb)
-                        parent[nb] = cur
-                        q.append(nb)
-                        yield {"event": "enqueue", "cell": nb, "from": cur, "queue_size": len(q), "visited_count": len(visited)}
+                        parent[nb] = current
+                        queue.append(nb)
 
-                yield {"event": "visit", "cell": cur, "queue_size": len(q), "visited_count": len(visited)}
+                        yield {
+                            "event": "discover",
+                            "from": current,
+                            "to": nb,
+                            "queue_size": len(queue),
+                            "visited_count": len(visited)
+                        }
 
-            yield {"event": "finished", "found": False, "visited_count": len(visited)}
+            path = []
+            if goal in parent:
+                cur = goal
+                while cur is not None:
+                    path.append(cur)
+                    cur = parent[cur]
+                path.reverse()
+
+            yield {
+                "event": "done",
+                "path": path,
+                "path_length": len(path)
+            }
 
         if yield_events:
-            return gen()
-        
-        else:
-            for _ in gen():
-                pass
-            return None
-        
+            return generator()
+
+        for _ in generator():
+            pass
+        return None      
+    '''
+    def bfs_shortest_path(self, start=None, goal=None):
+
+        if start is None:
+            start = self.start
+
+        if goal is None:
+            goal = self.goal
+
+        queue = deque([start])
+        visited = {start}
+        parent = {start: None}
+
+        while queue:
+            current = queue.popleft()
+
+            if current == goal:
+                break
+
+            for nb in self.neighbors_open(*current):
+
+                if nb not in visited:
+
+                    visited.add(nb)
+                    parent[nb] = current
+                    queue.append(nb)
+
+        # Reconstrucción del camino
+        if goal not in parent:
+            return []
+
+        path = []
+        cur = goal
+
+        while cur is not None:
+            path.append(cur)
+            cur = parent[cur]
+
+        path.reverse()
+        return path
+    '''  
+
 # Visualizador del Grid
 class MainWindow(tk.Tk):
     def __init__(self, n: int):
@@ -399,7 +467,6 @@ class MainWindow(tk.Tk):
         self.gen = None
         self.grid = None
 
-    # ---------------- Run BFS ----------------
     def on_run_bfs(self):
         # Solo si hay grid ya generado (puede haber sido generado animado o ya terminado)
         if self.grid is None:
@@ -416,7 +483,6 @@ class MainWindow(tk.Tk):
         self.status_label.config(text="BFS iniciado.")
         self._schedule_next()
 
-    # ---------------- Drawing ----------------
     def cell_to_px(self, r: int, c: int):
         x0 = self.PADDING + c * self.CELL_PX
         y0 = self.PADDING + r * self.CELL_PX
@@ -484,42 +550,63 @@ class MainWindow(tk.Tk):
         br, bc = b
 
         if ar == br:
+
             if ac + 1 == bc:
+
                 k1 = f"wall-{ar}-{ac}-right"
                 k2 = f"wall-{br}-{bc}-left"
+
                 for k in (k1, k2):
+
                     if k in self.draw_items:
+
                         try:
                             self.canvas.delete(self.draw_items[k])
                         except Exception:
                             pass
                         del self.draw_items[k]
+
             elif ac - 1 == bc:
+
                 k1 = f"wall-{ar}-{ac}-left"
                 k2 = f"wall-{br}-{bc}-right"
+
                 for k in (k1, k2):
+
                     if k in self.draw_items:
+
                         try:
                             self.canvas.delete(self.draw_items[k])
                         except Exception:
                             pass
                         del self.draw_items[k]
+
         elif ac == bc:
+
             if ar + 1 == br:
+
                 k1 = f"wall-{ar}-{ac}-down"
                 k2 = f"wall-{br}-{bc}-up"
+
                 for k in (k1, k2):
+
                     if k in self.draw_items:
+
                         try:
                             self.canvas.delete(self.draw_items[k])
                         except Exception:
                             pass
                         del self.draw_items[k]
+
             elif ar - 1 == br:
+
                 k1 = f"wall-{ar}-{ac}-up"
                 k2 = f"wall-{br}-{bc}-down"
+
                 for k in (k1, k2):
+
                     if k in self.draw_items:
+
                         try:
                             self.canvas.delete(self.draw_items[k])
                         except Exception:
@@ -531,89 +618,117 @@ class MainWindow(tk.Tk):
 
         # Eventos del laberinto
         if ev_type == "start" and "from" not in event and "cell" in event and "enqueue" not in event:
-            # Esto puede ser tanto inicio del laberinto como inicio de BFS
-            # Simplemente se reutilizan posteriormente estos eventos en el código
+
             cell = event.get("cell")
+
             if cell:
+
                 r, c = cell
                 key = f"cell-{r}-{c}-bg"
-                if key in self.draw_items:
-                    self.canvas.itemconfigure(self.draw_items[key], fill="#58fc70")
-            self.status_label.config(text=f"Start: {cell}")
 
-        elif ev_type == "carve":
-            a = event.get("from")
-            b = event.get("to")
+                if key in self.draw_items:
+
+                    self.canvas.itemconfigure(self.draw_items[key], fill="#58fc70")
+
+            self.status_label.config(text=f"Start: {cell}")
+            return
+
+        if ev_type == "carve":
+
+            a = event.get("from"); b = event.get("to")
+
             if a and b:
+
                 self.remove_wall_visual(a, b)
                 kb = f"cell-{b[0]}-{b[1]}-bg"
+
                 if kb in self.draw_items:
+
                     self.canvas.itemconfigure(self.draw_items[kb], fill="#e8f8e8")
+
             self.status_label.config(text=f"Carve {a} -> {b} (visited {event.get('visited_count')})")
+            return
 
-        elif ev_type == "backtrack":
+        if ev_type == "backtrack":
+
             cell = event.get("cell")
-            if cell:
-                kr = f"cell-{cell[0]}-{cell[1]}-bg"
-                if kr in self.draw_items:
-                    self.canvas.itemconfigure(self.draw_items[kr], fill="#f6f6f6")
-            self.status_label.config(text=f"Backtrack {cell}")
 
-        elif ev_type == "done" and ("found" not in event):
+            if cell:
+
+                kr = f"cell-{cell[0]}-{cell[1]}-bg"
+
+                if kr in self.draw_items:
+
+                    self.canvas.itemconfigure(self.draw_items[kr], fill="#f6f6f6")
+
+            self.status_label.config(text=f"Backtrack {cell}")
+            return
+
+        if ev_type == "done" and ("found" not in event) and ("path" not in event):
             self.status_label.config(text=f"Maze done. visited {event.get('visited_count')}")
+
             if self.grid and hasattr(self.grid, "goal"):
                 gr, gc = self.grid.goal
                 key = f"cell-{gr}-{gc}-bg"
+
                 if key in self.draw_items:
                     self.canvas.itemconfigure(self.draw_items[key], fill="#ff3f3f")
+
             return
 
-        # Eventos del BFS
-        elif ev_type == "enqueue":
-            cell = event.get("cell")
+        # Corrección de Chatgpt con los nombres de la solución anterior al BFS
+
+        # ENQUEUE / DISCOVER
+        if ev_type == "enqueue" or ev_type == "discover":
+            cell = event.get("cell") or event.get("to")  # discover uses 'to' for the discovered cell
             if cell:
                 k = f"cell-{cell[0]}-{cell[1]}-bg"
                 if k in self.draw_items:
-                    # Color frontera (enqueue)
-                    self.canvas.itemconfigure(self.draw_items[k], fill="#ffe38a")
+                    self.canvas.itemconfigure(self.draw_items[k], fill="#ffe38a")  # frontier color
+                # mark frontier for possible undo
                 self.draw_items[f"frontier-{cell[0]}-{cell[1]}"] = 1
             self.status_label.config(text=f"Enqueue {cell} q={event.get('queue_size')}")
+            return
 
-        elif ev_type == "dequeue":
+        # DEQUEUE / EXPAND
+        if ev_type == "dequeue" or ev_type == "expand":
             cell = event.get("cell")
             if cell:
                 k = f"cell-{cell[0]}-{cell[1]}-bg"
                 if k in self.draw_items:
-                    # Color nodo actual
-                    self.canvas.itemconfigure(self.draw_items[k], fill="#8cd3ff")
+                    self.canvas.itemconfigure(self.draw_items[k], fill="#8cd3ff")  # current node color
             self.status_label.config(text=f"Dequeue {cell} q={event.get('queue_size')}")
+            return
 
-        elif ev_type == "visit":
+        # VISIT
+        if ev_type == "visit":
             cell = event.get("cell")
             if cell:
                 k = f"cell-{cell[0]}-{cell[1]}-bg"
                 if k in self.draw_items:
-                    self.canvas.itemconfigure(self.draw_items[k], fill="#d1f7c4")
+                    self.canvas.itemconfigure(self.draw_items[k], fill="#d1f7c4")  # visited color
                 fk = f"frontier-{cell[0]}-{cell[1]}"
-                if fk in self.draw_items:
-                    del self.draw_items[fk]
+                if fk in self.draw_items: del self.draw_items[fk]
             self.status_label.config(text=f"Visit {cell} visited={event.get('visited_count')}")
+            return
 
-        elif ev_type == "goal_found":
+        # GOAL_FOUND or DONE-with-path
+        if ev_type == "goal_found" or (ev_type == "done" and "path" in event):
             path = event.get("path", [])
             self.status_label.config(text=f"Goal found! path len={len(path)}")
-            self.animate_path(path)
+            if path:
+                self.animate_path(path)
             return
 
-        elif ev_type == "finished":
-            found = event.get("found", False)
-            self.status_label.config(text=f"BFS finished. found={found} visited={event.get('visited_count')}")
+        # FINISHED (explicit 'finished' event) or done-without-path
+        if ev_type == "finished" or (ev_type == "done" and "path" not in event):
+            found = event.get("found", None)
+            # if BFS emitted 'done' for maze generation, that was handled above
+            self.status_label.config(text=f"Finished. found={found} visited={event.get('visited_count')}")
             return
 
-        else:
-            # Evento desconocido o no manejado
-            # Lo imprimimos en status para depuración
-            self.status_label.config(text=f"Evento desconocido: {event}")
+        # Evento desconocido
+        self.status_label.config(text=f"Evento desconocido: {event}")
 
     def animate_path(self, path: List[Cell], step_ms: int = 30):
         """
@@ -622,7 +737,6 @@ class MainWindow(tk.Tk):
         if not path:
             return
 
-        # pintar iterativamente; guardamos draw ids para poder restaurar si se reinicia
         def paint_step(idx: int):
             if idx >= len(path):
                 return
